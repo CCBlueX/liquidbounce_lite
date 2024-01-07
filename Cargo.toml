@@ -1,0 +1,37 @@
+[package]
+name = "liquidbounce_lite"
+version = "0.1.0"
+edition = "2021"
+authors = ["1zuna <marco@ccbluex.net>"]
+description = "A lightweight version of LiquidBounce utilizing DLL injection written in Rust."
+license = "GNU GPLv3"
+homepage = "https://liquidbounce.net/"
+categories = ["game-hacking", "minecraft", "injector"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "liquidbounce"
+crate-type = ["cdylib"]
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = "0.3.0"
+anyhow = "1.0"
+jni = "0.21"
+
+[dependencies.windows]
+version = "0.52"
+features = [
+    "Data_Xml_Dom",
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Console",
+    "Win32_System_SystemServices",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[build-dependencies]
+cc = "1.0"
