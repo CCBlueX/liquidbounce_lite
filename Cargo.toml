@@ -18,7 +18,10 @@ crate-type = ["cdylib"]
 tracing = "0.1"
 tracing-subscriber = "0.3.0"
 anyhow = "1.0"
+derive-new = "0.5"
 jni = "0.21"
+lazy_static = "1.4.0"
+yarn_remapper = "0.1.0"
 
 [dependencies.windows]
 version = "0.52"
