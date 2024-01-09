@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use jni::JNIEnv;
 use sdk::{jni::retrieve_java_vm, game::MinecraftClient};
 use windows::{ 
     Win32::Foundation::*, 
@@ -11,6 +12,8 @@ use tracing::{info, Level, error, trace, debug};
 use tracing_subscriber::FmtSubscriber;
 
 use std::{thread::{self, sleep}, time::Duration, os::windows::io::AsRawHandle};
+
+use crate::sdk::game::Vec3d;
 
 pub mod sdk;
 
@@ -63,25 +66,43 @@ pub fn start_client() -> Result<()> {
     loop {
         // Retrieve the Java environment for further operations.
         let jni_env = jvm.get_env()?;
-        let client = MinecraftClient::get_instance(jni_env)?;
-        if let Err(e) = report_position(client) {
-            error!("Failed to report position: {:?}", e);
+        let client = MinecraftClient::get_instance(unsafe {jni_env.unsafe_clone()})?;
+        if let Err(e) = dosmth(client, jni_env) {
+            error!("Failed to do something: {:?}", e);
         }
 
-        sleep(Duration::from_secs(10));
+        sleep(Duration::from_millis(50));
     }
 
     Ok(())
 }
 
-pub fn report_position(mut client: MinecraftClient) -> Result<()> {
-    let mut player = client.get_player()?;
-
-    let x = player.get_x()?;
-    let y = player.get_y()?;
-    let z = player.get_z()?;
+pub fn dosmth(mut client: MinecraftClient, env: JNIEnv) -> Result<()> {
+    let mut player = client.get_player()?.as_entity()?;
+    let mut pos = player.get_pos()?.as_position()?;
+    let x = pos.get_x()?;
+    let y = pos.get_y()?;
+    let z = pos.get_z()?;
     info!("Player position: ({}, {}, {})", x, y, z);
 
+    let mut velocity = player.get_velocity()?.as_position()?;
+    let x = velocity.get_x()?;
+    let y = velocity.get_y()?;
+    let z = velocity.get_z()?;
+    info!("Player velocity: ({}, {}, {})", x, y, z);
+
+    if player.is_on_ground()? {
+        info!("Player is on the ground");
+
+        let jump_velocity = Vec3d::new_obj(env, x * 2.0, 0.42, z * 2.0)?;
+        player.set_velocity(&jump_velocity)?;
+    } else {
+        info!("Player is not on the ground");
+
+        let new_velocity = Vec3d::new_obj(env, x * 1.1, y, z * 1.1)?;
+        player.set_velocity(&new_velocity)?;
+    }
+    
     Ok(())
 }
 
