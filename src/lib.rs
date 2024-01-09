@@ -1,23 +1,21 @@
 use anyhow::Result;
-use jni::JavaVM;
-use jni::sys::{jsize, jint};
 
+use jni::JNIEnv;
+use sdk::{jni::retrieve_java_vm, game::MinecraftClient};
 use windows::{ 
     Win32::Foundation::*, 
     Win32::System::SystemServices::*, 
-    Win32::System::Console::{AllocConsole, FreeConsole},
-    Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress},
+    Win32::System::Console::{AllocConsole, FreeConsole, SetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE}
 };
-use windows::core::s;
 
 use tracing::{info, Level, error, trace, debug};
 use tracing_subscriber::FmtSubscriber;
 
-use std::thread;
+use std::{thread::{self, sleep}, time::Duration, os::windows::io::AsRawHandle};
 
-// Define a type alias for the `JNI_GetCreatedJavaVMs` function pointer.
-#[allow(non_camel_case_types)]
-type JNI_GetCreatedJavaVMs_Fn = fn(vm_buf: *mut *mut JavaVM, buf_len: jsize, num_vms: *mut jsize) -> jint;
+use crate::sdk::game::Vec3d;
+
+pub mod sdk;
 
 // The entry function responsible for the primary execution thread of the application.
 pub fn main_thread() {
@@ -31,9 +29,9 @@ pub fn main_thread() {
 
     // Initialize a Windows console using the Win32 API
     // Attempt to allocate a console and log any error that occurs.
-    if let Err(e) = unsafe { AllocConsole() } {
-        error!("Failed to allocate console: {:?}", e);
-    }
+    //if let Err(e) = alloc_console() {
+    //    error!("Failed to allocate console: {:?}", e);
+    //}
 
     // Attempt to start the client and log any error that occurs.
     if let Err(e) = start_client() {
@@ -41,47 +39,70 @@ pub fn main_thread() {
     }
 
     // Clean up by freeing the allocated console when done.
-    let _ = unsafe { FreeConsole() };
+    //let _ = unsafe { FreeConsole() };
+}
+
+pub fn alloc_console() -> Result<()> {
+    unsafe { AllocConsole() }?;
+
+    // Hook the standard output streams to the console.
+    let stdout = std::io::stdout();
+    let handle = stdout.lock().as_raw_handle();
+    let handle = HANDLE(handle as isize);
+    unsafe { SetStdHandle(STD_OUTPUT_HANDLE, handle) }?;
+
+    let stderr = std::io::stderr();
+    let handle = stderr.lock().as_raw_handle();
+    let handle = HANDLE(handle as isize);
+    unsafe { SetStdHandle(STD_ERROR_HANDLE, handle) }?;
+
+    Ok(())
 }
 
 // Responsible for starting the client, including attaching to the JVM and initializing logging.
 pub fn start_client() -> Result<()> {
-    // Attempt to obtain a module handle for the JVM DLL and log if successful.
-    let jvm_dll_handle = unsafe { GetModuleHandleA(s!("jvm.dll")) }?;
-    trace!("Obtained jvm.dll handle: {:?}", jvm_dll_handle);
+    let jvm = retrieve_java_vm()?;
 
-    // Retrieve the `JNI_GetCreatedJavaVMs` function from the JVM DLL.
-    let jni_get_created_java_vms_fn_ptr = unsafe { GetProcAddress(jvm_dll_handle, s!("JNI_GetCreatedJavaVMs")) };
-    let get_created_java_vms: JNI_GetCreatedJavaVMs_Fn = unsafe { std::mem::transmute(jni_get_created_java_vms_fn_ptr) };
-    debug!("Address of JNI_GetCreatedJavaVMs function: {:?}", jni_get_created_java_vms_fn_ptr);
+    loop {
+        // Retrieve the Java environment for further operations.
+        let jni_env = jvm.get_env()?;
+        let client = MinecraftClient::get_instance(unsafe {jni_env.unsafe_clone()})?;
+        if let Err(e) = dosmth(client, jni_env) {
+            error!("Failed to do something: {:?}", e);
+        }
 
-    // Initialize variables to hold the JVM instance and JVM count.
-    debug!("Retrieving the list of JVMs.");
-    let mut jvm_instance: *mut JavaVM = std::ptr::null_mut();
-    let mut number_of_jvms: jsize = 0;
-    let get_jvms_result = get_created_java_vms(&mut jvm_instance as _, 1, &mut number_of_jvms as _);
-    debug!("Number of JVMs found: {}", number_of_jvms);
-    trace!("JNI_GetCreatedJavaVMs response code: {:?}", get_jvms_result);
+        sleep(Duration::from_millis(50));
+    }
 
-    // Convert the raw JVM pointer to a `JavaVM` instance and attach the current thread as a daemon.
-    let jvm = unsafe { JavaVM::from_raw(jvm_instance as _)? };
-    jvm.attach_current_thread_as_daemon()?;
+    Ok(())
+}
 
-    // Retrieve the Java environment for further operations.
-    let mut jvm_environment = jvm.get_env()?;
-    info!("Obtained the JVM environment.");
+pub fn dosmth(mut client: MinecraftClient, env: JNIEnv) -> Result<()> {
+    let mut player = client.get_player()?.as_entity()?;
+    let mut pos = player.get_pos()?.as_position()?;
+    let x = pos.get_x()?;
+    let y = pos.get_y()?;
+    let z = pos.get_z()?;
+    info!("Player position: ({}, {}, {})", x, y, z);
 
-    // TODO: Implement a name remapper for working with obfuscated code.
-    // TODO: Generate an SDK based on source code or mappings.
+    let mut velocity = player.get_velocity()?.as_position()?;
+    let x = velocity.get_x()?;
+    let y = velocity.get_y()?;
+    let z = velocity.get_z()?;
+    info!("Player velocity: ({}, {}, {})", x, y, z);
 
-    // Look up the Minecraft client class using the JNI environment.
-    let minecraft_client_class = jvm_environment.find_class("net/minecraft/client/MinecraftClient")?;
-    trace!("Located MinecraftClient class: {:?}", minecraft_client_class);
+    if player.is_on_ground()? {
+        info!("Player is on the ground");
 
-    // Retrieve the field ID for the static `instance` field of the Minecraft client class.
-    let minecraft_client_instance_field_id = jvm_environment.get_static_field_id(minecraft_client_class, "instance", "Lnet/minecraft/client/MinecraftClient;")?;
-    trace!("MinecraftClient `instance` field ID: {:?}", minecraft_client_instance_field_id);
+        let jump_velocity = Vec3d::new_obj(env, x * 2.0, 0.42, z * 2.0)?;
+        player.set_velocity(&jump_velocity)?;
+    } else {
+        info!("Player is not on the ground");
 
+        let new_velocity = Vec3d::new_obj(env, x * 1.1, y, z * 1.1)?;
+        player.set_velocity(&new_velocity)?;
+    }
+    
     Ok(())
 }
 
